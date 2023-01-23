@@ -12,16 +12,35 @@
 #endif
 
 int main() {
-  int * p = MALLOC(5 * sizeof(int));
-  for (size_t i = 0; i < 6; i++) {
-    p[i] = i * i;
-  }
-  int sum = 0;
-  int exp_sum = 0;
-  for (size_t i = 0; i < 5; i++) {
-    sum += p[i];
-    exp_sum += i * i;
-  }
-  printf("sum=%d, exp_sum=%d\n", sum, exp_sum);
+  int * int1 = MALLOC(10 * sizeof(int));
+  printf("---------------------------------\n");
+  int * int2 = MALLOC(sizeof(int));
+  printf("---------------------------------\n");
+  int * int3 = MALLOC(sizeof(int));
+  printf("---------------------------------\n");
+  *int1 = 1;
+  *int2 = 2;
+  *int3 = 3;
+  FREE(int1);
+  printf("---------------------------------\n");
+  char * char1 = MALLOC(sizeof(char));
+  *char1 = 'a';
+  printf("---------------------------------\n");
+  char * char2 = MALLOC(sizeof(char));
+  *char2 = 'b';
+  printf("---------------------------------\n");
+  char * char3 = MALLOC(sizeof(char));
+  *char3 = 'c';
+  printf("---------------------------------\n");
+  FREE(char1);
+  printf("---------------------------------\n");
+  FREE(char2);
+  printf("---------------------------------\n");
+  FREE(char3);
+  printf("---------------------------------\n");
+  FREE(int3);
+  printf("---------------------------------\n");
+  FREE(int2);
+  printf("---------------------------------\n");
   return EXIT_SUCCESS;
 }

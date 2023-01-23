@@ -1,90 +1,148 @@
 #include "my_malloc.h"
 
-#include <stdio.h>
+#include <assert.h>
 #include <unistd.h>
-struct free_region_node_tag {
-  size_t size;
-  struct free_region_node_tag * next;
-};
-typedef struct free_region_node_tag free_node_t;
-static free_node_t head_node = {0, NULL};  //dummy head node
 static void * heap_start = NULL;
 static int program_start = 0;
-//first fit
+static header_t * sentinel_head = NULL;
+static footer_t * sentinel_foot = NULL;
+
+void init_heap() {
+  assert(program_start == 0);
+  program_start = 1;
+  heap_start = sbrk(sizeof(header_t) + sizeof(footer_t));
+  init_sentinel_head();
+  init_sentinel_foot();
+}
+
+void init_sentinel_head() {
+  sentinel_head = (header_t *)heap_start;
+  sentinel_head->allocated = 1;
+  sentinel_head->data_size = 0;
+  sentinel_head->list_next = sentinel_head;
+  sentinel_head->list_prev = sentinel_head;
+}
+
+void init_sentinel_foot() {
+  sentinel_foot = find_self_footer((header_t *)heap_start, 0);
+  sentinel_foot->allocated = 1;
+  sentinel_foot->data_size = 0;
+  sentinel_foot->has_back = 0;
+}
+
 void * ff_malloc(size_t size) {
-  printf("ff_malloc called\n");
-  free_node_t * cur = &head_node;
-  free_node_t * prev = NULL;
-  while (cur->next != NULL) {
-    prev = cur;
-    cur = cur->next;
-    if (cur->size >= size) {   //find region! first fit.
-      prev->next = cur->next;  //remove the node from list
-      printf("%s", "find free slot to alloc.\n");
-      if ((int)cur->size - (int)size - (int)sizeof(free_node_t) >
-          (int)sizeof(free_node_t)) {  //enough free space, split
-        printf("%s", "the free slot is large, split.\n");
-        free_node_t * toAdd = (free_node_t *)(((char *)cur) + sizeof(free_node_t) + size);
-        toAdd->next = head_node.next;
-        toAdd->size = cur->size - size - 2 * sizeof(free_node_t);
-        head_node.next = toAdd;
-      }
-      return ((char *)cur) + sizeof(free_node_t);
-    }
-  }                                                 //no free block match
-  size_t total_alloc = sizeof(free_node_t) + size;  //size including data and metadata
-  void * new_block = sbrk(total_alloc);
-  if (new_block == (void *)(-1)) {
-    perror("sbrk_failure.\n");
-    exit(EXIT_FAILURE);
-  }
-  free_node_t * block = (free_node_t *)new_block;
-  printf("sbrk\n");
   if (program_start == 0) {
-    heap_start = block;
-    program_start = 1;
+    init_heap();
   }
-  block->size = size;
-  block->next = NULL;
-  return ((char *)block) + sizeof(free_node_t);
+  header_t * header = ff_find(size);
+  if (header != NULL) {
+    header->allocated = 1;  //set to allocated
+    find_self_footer(header, header->data_size)->allocated = 1;
+    //TODO: large size try to split.
+    return ((char *)header) + sizeof(header_t);
+  }
+  //no free block find, sbrk
+  void * new_block = sbrk(sizeof(header_t) + size + sizeof(footer_t));
+  header_t * new_block_header = init_header_footer(size, new_block);
+  return ((char *)new_block_header) + sizeof(header_t);
+}
+
+header_t * init_header_footer(size_t size, void * new_block) {
+  header_t * new_block_header = (header_t *)new_block;
+  new_block_header->allocated = 1;
+  new_block_header->data_size = size;
+  new_block_header->list_next = NULL;
+  new_block_header->list_next = NULL;
+  footer_t * new_block_footer = find_self_footer(new_block_header, size);
+  new_block_footer->allocated = 1;
+  new_block_footer->data_size = size;
+  new_block_footer->has_back = 0;
+  find_front_footer(new_block_header)->has_back = 1;
+  return new_block_header;
+}
+
+footer_t * find_self_footer(header_t * header, size_t data_size) {
+  return (footer_t *)(((char *)header) + sizeof(header_t) + data_size);
+}
+footer_t * find_front_footer(header_t * header) {
+  return (footer_t *)(((char *)header) - sizeof(footer_t));
+}
+header_t * find_self_header(footer_t * footer, size_t data_size) {
+  return (header_t *)(((char *)footer) - data_size - sizeof(header_t));
+}
+header_t * find_back_header(footer_t * footer) {
+  return (header_t *)(((char *)footer) + sizeof(footer_t));
+}
+
+header_t * ff_find(size_t size) {
+  header_t * cur = sentinel_head->list_next;
+  while (cur != sentinel_head) {
+    assert(cur->allocated == 0);
+    if (cur->data_size >= size) {
+      delete_from_list(cur);
+      return cur;
+    }
+    cur = cur->list_next;
+  }
+  return NULL;
 }
 
 void ff_free(void * ptr) {
-  if (ptr == NULL) {
-    return;
-  }
-  free_node_t * ptr_free_node = (free_node_t *)(((char *)ptr) - sizeof(free_node_t));
-  free_node_t * back_adj = (free_node_t *)(((char *)ptr) + ptr_free_node->size);
-  free_node_t * front_adj = NULL;
-  free_node_t * cur = &head_node;
-  free_node_t * prev = NULL;
-  while (cur->next != NULL) {
-    prev = cur;
-    cur = cur->next;
-    if (cur == back_adj) {  //find back free block, merge
-      printf("%s", "find back free block, merge\n");
-      if (front_adj == NULL) {
-        printf("%s", "not find front free slot yet.\n");
-        ptr_free_node->size += back_adj->size + sizeof(free_node_t);
-      }
-      else {
-        printf("%s", "add to front free slot.\n");
-        front_adj->size += back_adj->size + sizeof(free_node_t);
-      }
-      prev->next = cur->next;  //remove back_adj from list
+  header_t * header = (header_t *)(((char *)ptr) - sizeof(header_t));
+  footer_t * footer = find_self_footer(header, header->data_size);
+  //merge if possible
+  if (footer->has_back && find_back_header(footer)->allocated == 0) {
+    if (find_front_footer(header)->allocated == 0) {  //case 1: merge front and back;
+      footer_t * front_footer = find_front_footer(header);
+      header_t * front_header = find_self_header(front_footer, front_footer->data_size);
+      header_t * back_header = find_back_header(footer);
+      footer_t * back_footer = find_self_footer(back_header, back_header->data_size);
+      front_header->data_size += 2 * sizeof(header_t) + 2 * sizeof(footer_t) +
+                                 header->data_size + back_header->data_size;
+      delete_from_list(back_header);
+      back_footer->allocated = 0;
+      back_footer->data_size = front_header->data_size;
     }
-    else if ((free_node_t *)(((char *)cur) + cur->size + sizeof(free_node_t)) ==
-             ptr_free_node) {  //find front free slot, merge
-      printf("%s", "find front free slot,merge.\n");
-      front_adj = cur;
-      front_adj->size += ptr_free_node->size + sizeof(free_node_t);
+    else {  //case2: merge back
+      header_t * back_header = find_back_header(footer);
+      delete_from_list(back_header);
+      header->data_size += sizeof(footer_t) + sizeof(header_t) + back_header->data_size;
+      header->allocated = 0;
+      footer = find_self_footer(header, header->data_size);
+      footer->allocated = 0;
+      footer->data_size = header->data_size;
+      add_to_front(header);
     }
   }
+  else {
+    if (find_front_footer(header)->allocated == 0) {  //case 3: merge front
+      footer_t * front_footer = find_front_footer(header);
+      header_t * front_header = find_self_header(front_footer, front_footer->data_size);
+      assert(front_header->allocated == 0);
+      front_header->data_size += sizeof(footer_t) + sizeof(header_t) + header->data_size;
+      footer->allocated = 0;
+      footer->data_size = front_header->data_size;
+    }
+    else {  //case 4: no merge
+      add_to_front(header);
+      header->allocated = 0;
+      find_self_footer(header, header->data_size)->allocated = 0;
+    }
+  }
+}
 
-  if (front_adj == NULL) {  //add ptr to free list
-    ptr_free_node->next = head_node.next;
-    head_node.next = ptr_free_node;
-  }
+void add_to_front(header_t * header) {
+  header->list_next = sentinel_head->list_next;
+  header->list_prev = sentinel_head;
+  sentinel_head->list_next->list_prev = header;
+  sentinel_head->list_next = header;  //add to free list
+}
+
+void delete_from_list(header_t * header) {
+  header->list_prev->list_next = header->list_next;
+  header->list_next->list_prev = header->list_prev;  //remove the node from list.
+  header->list_next = NULL;
+  header->list_prev = NULL;
 }
 
 //Best Fit
@@ -100,11 +158,11 @@ unsigned long get_data_segment_size() {
   return sbrk(0) - heap_start;
 }  //in bytes
 unsigned long get_data_segment_free_space_size() {
-  free_node_t * cur = &head_node;
-  size_t size = 0;
-  while (cur->next != NULL) {
-    cur = cur->next;
-    size += sizeof(free_node_t) + cur->size;
+  header_t * cur = sentinel_head->list_next;
+  size_t ans = 0;
+  while (cur != sentinel_head) {
+    ans += sizeof(header_t) + cur->data_size + sizeof(footer_t);
+    cur = cur->list_next;
   }
-  return size;
+  return ans;
 }  //in byte
