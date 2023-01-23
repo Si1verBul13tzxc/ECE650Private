@@ -36,3 +36,4 @@ footer_t * find_front_footer(header_t * header);
 header_t * find_self_header(footer_t * footer, size_t size);
 header_t * find_back_header(footer_t * footer);
 void delete_from_list(header_t * header);
+void split(size_t allocated_data_size, header_t * header);

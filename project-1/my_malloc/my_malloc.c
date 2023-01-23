@@ -36,15 +36,39 @@ void * ff_malloc(size_t size) {
   }
   header_t * header = ff_find(size);
   if (header != NULL) {
-    header->allocated = 1;  //set to allocated
-    find_self_footer(header, header->data_size)->allocated = 1;
-    //TODO: large size try to split.
+    if (header->data_size >=
+        2 * size + sizeof(footer_t) + sizeof(header_t)) {  //large size: the size is large
+      split(size, header);
+    }
+    else {                    // no need to split
+      header->allocated = 1;  //set to allocated
+      find_self_footer(header, header->data_size)->allocated = 1;
+    }
     return ((char *)header) + sizeof(header_t);
   }
   //no free block find, sbrk
   void * new_block = sbrk(sizeof(header_t) + size + sizeof(footer_t));
   header_t * new_block_header = init_header_footer(size, new_block);
   return ((char *)new_block_header) + sizeof(header_t);
+}
+
+//enough to allocate 2 of required size, split
+void split(size_t allocated_data_size, header_t * header) {
+  size_t new_block_data_size =
+      header->data_size - allocated_data_size - sizeof(footer_t) - sizeof(header_t);
+  header->allocated = 1;
+  header->data_size = allocated_data_size;
+  footer_t * this_footer = find_self_footer(header, allocated_data_size);
+  this_footer->allocated = 1;
+  this_footer->data_size = allocated_data_size;
+  this_footer->has_back = 1;
+  header_t * new_header = find_back_header(this_footer);
+  new_header->allocated = 0;
+  new_header->data_size = new_block_data_size;
+  footer_t * new_footer = find_self_footer(new_header, new_block_data_size);
+  new_footer->allocated = 0;
+  new_footer->data_size = new_block_data_size;
+  add_to_front(new_header);
 }
 
 header_t * init_header_footer(size_t size, void * new_block) {
