@@ -111,6 +111,34 @@ header_t * ff_find(size_t size) {
   return NULL;
 }
 
+header_t * bf_find(size_t size) {
+  header_t * cur = sentinel_head->list_next;
+  header_t * bf_header = NULL;
+  size_t min_size_diff = (size_t)(-1);
+  size_t size_diff = 0;
+  while (cur != sentinel_head) {
+    if (cur->data_size >= size) {
+      if (cur->data_size == size) {  //perfectly fit
+        delete_from_list(cur);
+        return cur;
+      }
+      else {
+        size_diff = cur->data_size - size;
+        if (size_diff < min_size_diff) {
+          bf_header = cur;
+          min_size_diff = size_diff;
+        }
+      }
+    }
+    cur = cur->list_next;
+  }
+  if (bf_header) {
+    delete_from_list(bf_header);
+    return bf_header;
+  }
+  return NULL;
+}
+
 void ff_free(void * ptr) {
   header_t * header = (header_t *)(((char *)ptr) - sizeof(header_t));
   footer_t * footer = find_self_footer(header, header->data_size);
@@ -171,10 +199,29 @@ void delete_from_list(header_t * header) {
 
 //Best Fit
 void * bf_malloc(size_t size) {
-  return NULL;
+  if (program_start == 0) {
+    init_heap();
+  }
+  header_t * header = bf_find(size);
+  if (header != NULL) {
+    if (header->data_size >=
+        2 * size + sizeof(footer_t) + sizeof(header_t)) {  //large size: the size is large
+      split(size, header);
+    }
+    else {                    // no need to split
+      header->allocated = 1;  //set to allocated
+      find_self_footer(header, header->data_size)->allocated = 1;
+    }
+    return ((char *)header) + sizeof(header_t);
+  }
+  //no free block find, sbrk
+  void * new_block = sbrk(sizeof(header_t) + size + sizeof(footer_t));
+  header_t * new_block_header = init_header_footer(size, new_block);
+  return ((char *)new_block_header) + sizeof(header_t);
 }
+
 void bf_free(void * ptr) {
-  return;
+  ff_free(ptr);
 }
 
 //test methods
