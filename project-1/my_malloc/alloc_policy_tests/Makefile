@@ -1,6 +1,6 @@
 CC=gcc
 CFLAGS= -ggdb3 -fPIC #-O3 -fPIC
-MALLOC_VERSION=FF
+MALLOC_VERSION=BF
 WDIR=..
 
 all: equal_size_allocs small_range_rand_allocs large_range_rand_allocs
