@@ -1,0 +1,209 @@
+#include "my_malloc.h"
+
+#include <assert.h>
+#include <pthread.h>
+#include <unistd.h>
+static void * heap_start = NULL;
+static int program_start = 0;
+static header_t * sentinel_head = NULL;
+static footer_t * sentinel_foot = NULL;
+static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+
+//Thread Safe malloc/free: locking version
+void * ts_malloc_lock(size_t size) {
+  pthread_mutex_lock(&lock);
+  void * ans = bf_malloc(size);
+  pthread_mutex_unlock(&lock);
+  return ans;
+}
+
+void ts_free_lock(void * ptr) {
+  pthread_mutex_lock(&lock);
+  bf_free(ptr);
+  pthread_mutex_unlock(&lock);
+}
+
+void * ts_malloc_nolock(size_t size) {
+  return ts_malloc_lock(size);
+}
+
+void ts_free_nolock(void * ptr) {
+  free(ptr);
+}
+
+void * bf_malloc(size_t size) {
+  if (program_start == 0) {
+    init_heap();
+  }
+  header_t * header = bf_find(size);
+  if (header != NULL) {
+    if (header->data_size >=
+        2 * size + sizeof(footer_t) + sizeof(header_t)) {  //large size: the size is large
+      split(size, header);
+    }
+    else {                    // no need to split
+      header->allocated = 1;  //set to allocated
+      find_self_footer(header, header->data_size)->allocated = 1;
+    }
+    return ((char *)header) + sizeof(header_t);
+  }
+  //no free block find, sbrk
+  void * new_block = sbrk(sizeof(header_t) + size + sizeof(footer_t));
+  header_t * new_block_header = init_header_footer(size, new_block);
+  return ((char *)new_block_header) + sizeof(header_t);
+}
+
+void init_heap() {
+  assert(program_start == 0);
+  program_start = 1;
+  heap_start = sbrk(sizeof(header_t) + sizeof(footer_t));
+  init_sentinel_head();
+  init_sentinel_foot();
+}
+
+void init_sentinel_head() {
+  sentinel_head = (header_t *)heap_start;
+  sentinel_head->allocated = 1;
+  sentinel_head->data_size = 0;
+  sentinel_head->list_next = sentinel_head;
+  sentinel_head->list_prev = sentinel_head;
+}
+
+void init_sentinel_foot() {
+  sentinel_foot = find_self_footer((header_t *)heap_start, 0);
+  sentinel_foot->allocated = 1;
+  sentinel_foot->data_size = 0;
+  sentinel_foot->has_back = 0;
+}
+
+//enough to allocate 2 of required size, split
+void split(size_t allocated_data_size, header_t * header) {
+  size_t new_block_data_size =
+      header->data_size - allocated_data_size - sizeof(footer_t) - sizeof(header_t);
+  header->allocated = 1;
+  header->data_size = allocated_data_size;
+  footer_t * this_footer = find_self_footer(header, allocated_data_size);
+  this_footer->allocated = 1;
+  this_footer->data_size = allocated_data_size;
+  this_footer->has_back = 1;
+  header_t * new_header = find_back_header(this_footer);
+  new_header->allocated = 0;
+  new_header->data_size = new_block_data_size;
+  footer_t * new_footer = find_self_footer(new_header, new_block_data_size);
+  new_footer->allocated = 0;
+  new_footer->data_size = new_block_data_size;
+  add_to_front(new_header);
+}
+
+header_t * init_header_footer(size_t size, void * new_block) {
+  header_t * new_block_header = (header_t *)new_block;
+  new_block_header->allocated = 1;
+  new_block_header->data_size = size;
+  new_block_header->list_next = NULL;
+  new_block_header->list_next = NULL;
+  footer_t * new_block_footer = find_self_footer(new_block_header, size);
+  new_block_footer->allocated = 1;
+  new_block_footer->data_size = size;
+  new_block_footer->has_back = 0;
+  find_front_footer(new_block_header)->has_back = 1;
+  return new_block_header;
+}
+
+footer_t * find_self_footer(header_t * header, size_t data_size) {
+  return (footer_t *)(((char *)header) + sizeof(header_t) + data_size);
+}
+footer_t * find_front_footer(header_t * header) {
+  return (footer_t *)(((char *)header) - sizeof(footer_t));
+}
+header_t * find_self_header(footer_t * footer, size_t data_size) {
+  return (header_t *)(((char *)footer) - data_size - sizeof(header_t));
+}
+header_t * find_back_header(footer_t * footer) {
+  return (header_t *)(((char *)footer) + sizeof(footer_t));
+}
+
+header_t * bf_find(size_t size) {
+  header_t * cur = sentinel_head->list_next;
+  header_t * bf_header = NULL;
+  size_t min_size_diff = (size_t)(-1);  //the largest size_t
+  size_t size_diff = 0;
+  while (cur != sentinel_head) {
+    if (cur->data_size >= size) {
+      if (cur->data_size == size) {  //perfectly fit
+        delete_from_list(cur);
+        return cur;
+      }
+      else {
+        size_diff = cur->data_size - size;
+        if (size_diff < min_size_diff) {
+          bf_header = cur;
+          min_size_diff = size_diff;
+        }
+      }
+    }
+    cur = cur->list_next;
+  }
+  if (bf_header) {
+    delete_from_list(bf_header);
+    return bf_header;
+  }
+  return NULL;
+}
+
+void bf_free(void * ptr) {
+  header_t * header = (header_t *)(((char *)ptr) - sizeof(header_t));
+  footer_t * footer = find_self_footer(header, header->data_size);
+  //merge if possible
+  if (footer->has_back && find_back_header(footer)->allocated == 0) {
+    if (find_front_footer(header)->allocated == 0) {  //case 1: merge front and back;
+      footer_t * front_footer = find_front_footer(header);
+      header_t * front_header = find_self_header(front_footer, front_footer->data_size);
+      header_t * back_header = find_back_header(footer);
+      footer_t * back_footer = find_self_footer(back_header, back_header->data_size);
+      front_header->data_size += 2 * sizeof(header_t) + 2 * sizeof(footer_t) +
+                                 header->data_size + back_header->data_size;
+      delete_from_list(back_header);
+      back_footer->allocated = 0;
+      back_footer->data_size = front_header->data_size;
+    }
+    else {  //case2: merge back
+      header_t * back_header = find_back_header(footer);
+      delete_from_list(back_header);
+      header->data_size += sizeof(footer_t) + sizeof(header_t) + back_header->data_size;
+      header->allocated = 0;
+      footer = find_self_footer(header, header->data_size);
+      footer->allocated = 0;
+      footer->data_size = header->data_size;
+      add_to_front(header);
+    }
+  }
+  else {
+    if (find_front_footer(header)->allocated == 0) {  //case 3: merge front
+      footer_t * front_footer = find_front_footer(header);
+      header_t * front_header = find_self_header(front_footer, front_footer->data_size);
+      assert(front_header->allocated == 0);
+      front_header->data_size += sizeof(footer_t) + sizeof(header_t) + header->data_size;
+      footer->allocated = 0;
+      footer->data_size = front_header->data_size;
+    }
+    else {  //case 4: no merge
+      add_to_front(header);
+      header->allocated = 0;
+      find_self_footer(header, header->data_size)->allocated = 0;
+    }
+  }
+}
+
+void add_to_front(header_t * header, int mode) {
+  header->list_next = l_sentinel_head->list_next;
+  header->list_prev = l_sentinel_head;
+  sentinel_head->list_next->list_prev = header;
+  sentinel_head->list_next = header;  //add to free list
+}
+
+void delete_from_list(header_t * header) {
+  header->list_prev->list_next = header->list_next;
+  header->list_next->list_prev = header->list_prev;  //remove the node from list.
+  header->list_next = NULL;
+  header->list_prev = NULL;
+}
