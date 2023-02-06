@@ -22,9 +22,6 @@ void * bf_malloc(size_t size);
 void * ff_malloc(size_t size);
 void ff_free(void * ptr);
 void bf_free(void * ptr);
-unsigned long get_data_segment_size();             //in bytes
-unsigned long get_data_segment_free_space_size();  //in byte
-
 //helper
 void * _bf_malloc(size_t size, int mode);
 void _init_heap(int mode);
@@ -35,3 +32,5 @@ void _split(size_t allocated_data_size, header_t * header, int mode);
 header_t * _bf_find(size_t size, int mode);
 void _bf_free(void * ptr, int mode);
 header_t * _find_back_adjcent_header(header_t * front_header, size_t data_size);
+void _add_to_back(header_t * sentinel, header_t * new_header);
+void _delete_from_allocation(header_t * header);
