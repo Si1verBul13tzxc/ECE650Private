@@ -192,3 +192,18 @@ void ff_free(void * ptr) {
 void bf_free(void * ptr) {
   _bf_free(ptr, 0);
 }
+
+//test methods
+unsigned long get_data_segment_size() {
+  return sbrk(0) - heap_start;
+}
+//in bytes
+unsigned long get_data_segment_free_space_size() {
+  header_t * cur = sentinel_head->list_next;
+  size_t ans = 0;
+  while (cur != sentinel_head) {
+    ans += sizeof(header_t) + cur->data_size;
+    cur = cur->list_next;
+  }
+  return ans;
+}  //in byte
