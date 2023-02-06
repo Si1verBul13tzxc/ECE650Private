@@ -34,3 +34,5 @@ void _bf_free(void * ptr, int mode);
 header_t * _find_back_adjcent_header(header_t * front_header, size_t data_size);
 void _add_to_back(header_t * sentinel, header_t * new_header);
 void _delete_from_allocation(header_t * header);
+unsigned long get_data_segment_size();
+unsigned long get_data_segment_free_space_size();
