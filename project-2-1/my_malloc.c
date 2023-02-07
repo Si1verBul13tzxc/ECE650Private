@@ -12,7 +12,6 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static __thread void * th_heap_start = NULL;
 static __thread int th_program_start = 0;
 static __thread header_t * th_sentinel_head = NULL;
-
 //Thread Safe malloc/free: locking version
 void * ts_malloc_lock(size_t size) {
   pthread_mutex_lock(&lock);

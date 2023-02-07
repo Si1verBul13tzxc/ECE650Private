@@ -9,10 +9,9 @@ static header_t * sentinel_head = NULL;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 
 //thread-local-storage
-static __thread void * th_heap_start = NULL;
-static __thread int th_program_start = 0;
-static __thread header_t * th_sentinel_head = NULL;
-
+__thread void * th_heap_start = NULL;
+__thread int th_program_start = 0;
+__thread header_t * th_sentinel_head = NULL;
 //Thread Safe malloc/free: locking version
 void * ts_malloc_lock(size_t size) {
   pthread_mutex_lock(&lock);
@@ -39,12 +38,12 @@ void ts_free_nolock(void * ptr) {
 void * _bf_malloc(size_t size, int mode) {
   if (mode == 0) {
     if (program_start == 0) {
-      _init_heap(mode);
+      _init_heap(0);
     }
   }
   else if (mode == 1) {
     if (th_program_start == 0) {
-      _init_heap(mode);
+      _init_heap(1);
     }
   }
   header_t * header = _bf_find(size, mode);
@@ -83,7 +82,7 @@ void _init_heap(int mode) {
     pthread_mutex_lock(&lock);
     th_heap_start = sbrk(sizeof(header_t));  //sbrk need lock
     pthread_mutex_unlock(&lock);
-    th_sentinel_head = (header_t *)th_heap_start;
+    sentinel_head = th_sentinel_head = (header_t *)th_heap_start;
     sentinel = th_sentinel_head;
   }
   sentinel->allocated = 1;
@@ -204,7 +203,7 @@ void _add_to_front(header_t * header, int mode) {
     sentinel = sentinel_head;
   }
   else if (mode == 1) {
-    sentinel = th_sentinel_head;
+    sentinel = th_sentinel_head ? th_sentinel_head : sentinel_head;
   }
   header->list_next = sentinel->list_next;
   header->list_prev = sentinel;
