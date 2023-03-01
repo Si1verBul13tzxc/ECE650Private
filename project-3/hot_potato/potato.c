@@ -412,6 +412,9 @@ void receive_complete_message(pollfd_t * pollfds, size_t poll_size) {
 }
 
 void play(pollfd_t * pollfds, size_t poll_size, int num_hops) {
+  if (num_hops == 0) {
+    return;
+  }
   potato_t p;
   memset(&p, 0, sizeof(potato_t));
   p.num_hops = htonl(num_hops);
