@@ -9,7 +9,7 @@ int main(int argc, char ** argv) {
     return EXIT_FAILURE;
   }
   int listener = create_tcp_listener_fd("0");
-  pollfd_t * pollfds = alloc_pollfds(listener, ring_fd);
+  pollfd_t * pollfds = player_alloc_pollfds(listener, ring_fd);
   send_my_listening_port(pollfds);
   u_int32_t my_id = 0;
   u_int32_t num_players = 0;
@@ -25,7 +25,7 @@ int main(int argc, char ** argv) {
   //buffer[14] = 0;
   //printf("reveived: %s\n", buffer);
   notify_ringmaster_setupdone(pollfds[1].fd);
-  player_play_potato(pollfds, my_id + '0', num_players);
+  player_play_potato(pollfds, my_id, num_players);
   for (size_t i = 0; i < 4; i++) {
     close(pollfds[i].fd);
   }

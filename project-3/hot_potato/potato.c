@@ -1,5 +1,4 @@
 #include "potato.h"
-
 void error_handle(const char * message,
                   int exit_,
                   pollfd_t * pollfds,
@@ -101,13 +100,20 @@ int connect_to_host(const char * theHostname,
   return socket_fd;
 }
 
-pollfd_t * alloc_pollfds(int listener, int ring_fd) {
+pollfd_t * player_alloc_pollfds(int listener, int ring_fd) {
   pollfd_t * pollfds = malloc(sizeof(*pollfds) *
                               (4));  // one for ring_fd, one for listener, two for players
   pollfds->fd = listener;
   pollfds->events = POLLIN;
   pollfds[1].fd = ring_fd;
   pollfds[1].events = POLLIN;
+  return pollfds;
+}
+
+pollfd_t * alloc_pollfds(int listener, int number_players) {
+  pollfd_t * pollfds = malloc(sizeof(*pollfds) * (number_players + 1));
+  pollfds->fd = listener;
+  pollfds->events = POLLIN;
   return pollfds;
 }
 
@@ -179,7 +185,11 @@ void recv_neighbor_info_and_connect(void * fds,
       error_handle("poll fail", 1, pollfds, 4, NULL);
     }
     if (pollfds[1].revents & POLLIN) {  //listen from ring master
-      recv(pollfds[1].fd, &neighbors, sizeof(neighbors_info_t), MSG_WAITALL);
+      int bytes_received =
+          recv(pollfds[1].fd, &neighbors, sizeof(neighbors_info_t), MSG_WAITALL);
+      if (bytes_received <= 0) {
+        error_handle("server die", 1, pollfds, 2, NULL);
+      }
       /*printf("my id is %d, there is totally %d players in this game,left neighbor host "
              "is : %s, port: %s\n",
              ntohl(neighbors.id),
@@ -207,12 +217,20 @@ void notify_ringmaster_setupdone(int ring_fd) {
   send(ring_fd, buffer, strlen(buffer), 0);
 }
 
-int check_potato(potato_t * p, char my_id) {
+int check_potato(potato_t * p, u_int32_t my_id) {
   u_int32_t num_hops = ntohl(p->num_hops);
   num_hops--;
   p->num_hops = htonl(num_hops);
   u_int32_t cur_hops = ntohl(p->cur_hops);
-  p->trace[cur_hops++] = my_id;
+  char buff[10] = {0};
+  sprintf(buff, "%d", my_id);
+  int len = strlen(buff);
+  buff[len] = ',';
+  //fprintf(stdout, "The length of this id is %d\n", len);
+  //fprintf(stdout, "The string I append is %s\n", buff);
+  strcpy(p->trace + cur_hops, buff);
+  cur_hops += (len + 1);
+  //fprintf(stdout, "cur_hops is %d", cur_hops);
   p->cur_hops = htonl(cur_hops);
   if (num_hops == 0) {
     fprintf(stdout, "%s\n", "I'm it");
@@ -240,7 +258,7 @@ int sendall(int sock_fd, char * buf, int * len) {
   return n == -1 ? -1 : 0;  // return -1 on failure, 0 on success
 }
 
-void player_play_potato(pollfd_t * pollfds, char my_id, int num_players) {
+void player_play_potato(pollfd_t * pollfds, u_int32_t my_id, int num_players) {
   int finish = 0;
   srand((unsigned int)time(NULL) + my_id - '0');
   while (!finish) {
@@ -258,17 +276,17 @@ void player_play_potato(pollfd_t * pollfds, char my_id, int num_players) {
         if (status == 1) {
           int len = sizeof(p);
           sendall(pollfds[1].fd, (char *)&p, &len);
-          finish = 1;
+          //finish = 1;
         }
         else {
           int random = rand() % 2;
           int pollfds_index = random + 2;
           int neighbor_id;
           if (pollfds_index == 2) {  //right neighor
-            neighbor_id = (my_id - '0' + 1 + num_players) % num_players;
+            neighbor_id = (my_id + 1 + num_players) % num_players;
           }
           else {  //==3, left neighbor
-            neighbor_id = (my_id - '0' - 1 + num_players) % num_players;
+            neighbor_id = (my_id - 1 + num_players) % num_players;
           }
           int len = sizeof(p);
           sendall(pollfds[2 + random].fd, (char *)&p, &len);
@@ -291,7 +309,8 @@ void init_players_listening_port(pollfd_t * pollfds,
     for (size_t i = 1; i < poll_size; i++) {
       if (pollfds[i].revents & POLLIN) {  //client send!
         //printf("set up player %zu\n", i);
-        recv_listening_port(pollfds[i].fd, players + (i - 1));
+        recv_listening_port(
+            pollfds[i].fd, players + (i - 1), pollfds, poll_size, players);
         setup_player++;
       }
     }
@@ -303,14 +322,24 @@ void init_players_listening_port(pollfd_t * pollfds,
   }
 }
 
-void recv_listening_port(int fd, player_info_t * player) {
+void recv_listening_port(int fd,
+                         player_info_t * player,
+                         pollfd_t * pollfds,
+                         size_t poll_size,
+                         player_info_t * players) {
   char size_buf[2];
-  recv(fd, size_buf, 1, 0);
+  int bytes = recv(fd, size_buf, 1, 0);
+  if (bytes <= 0) {
+    error_handle("client disconnect", 1, pollfds, poll_size, players);
+  }
   size_buf[1] = 0;
   size_t size = strtol(size_buf, NULL, 0);
   //printf("size is :%zu\n", size);
   char content_buf[size + 1];
   recv(fd, content_buf, size, 0);
+  if (bytes <= 0) {
+    error_handle("client disconnect", 1, pollfds, poll_size, players);
+  }
   content_buf[size] = 0;
   //printf("content is:%s\n", content_buf);
   strcpy(player->listening_port, content_buf);
@@ -350,12 +379,14 @@ void wait_palyer(pollfd_t * pollfds, size_t poll_size, player_info_t * players) 
     if (poll(pollfds, poll_item_count, -1) == -1) {  //-1 timeout=forever
       error_handle("poll fail", 1, pollfds, poll_size, players);
     }
-    if (pollfds[0].revents & POLLIN) {  //listener ready to read
-      //printf("%s", "one player connected in!\n");
-      accept_new_fd(pollfds, &poll_item_count, players);
-    }
-    if (poll_item_count == poll_size) {  // all players connected
-      setup_ready = 1;
+    for (size_t i = 0; i < poll_item_count; i++) {
+      if (i == 0 && pollfds[i].revents & POLLIN) {  //listener ready to read
+        //printf("%s", "one player connected in!\n");
+        accept_new_fd(pollfds, &poll_item_count, players);
+        if (poll_item_count == poll_size) {  // all players connected
+          return;
+        }
+      }
     }
   }
 }
@@ -384,6 +415,7 @@ void send_neigher_info(pollfd_t * pollfds, size_t poll_size, player_info_t * pla
   for (size_t i = 1; i < poll_size; i++) {
     int left_id = (i - 1 + num_players - 1) % num_players;
     neighbors_info_t neighbors;
+    memset(&neighbors, 0, sizeof(neighbors));
     neighbors.id = htonl(players[i - 1].id);
     neighbors.num_players = htonl(poll_size - 1);
     strcpy(neighbors.left_hostname, players[left_id].hostname);
@@ -402,7 +434,10 @@ void receive_complete_message(pollfd_t * pollfds, size_t poll_size) {
     for (size_t i = 0; i < poll_size; i++) {
       if (i != 0 && pollfds[i].revents & POLLIN) {  //ready to read
         char buffer[2];
-        recv(pollfds[i].fd, buffer, sizeof(buffer), 0);
+        int bytes = recv(pollfds[i].fd, buffer, sizeof(buffer), 0);
+        if (bytes <= 0) {
+          error_handle("client die", 1, pollfds, poll_size, NULL);
+        }
         //fprintf(stdout, "%s\n", buffer);
         printf("Player %zu is ready to play\n", i - 1);
         ready_to_player_num++;
@@ -432,30 +467,25 @@ void play(pollfd_t * pollfds, size_t poll_size, int num_hops) {
     if (poll(pollfds, poll_size, -1) == -1) {
       error_handle("poll fail", 1, pollfds, poll_size, NULL);
     }
-    for (size_t i = 0; i < poll_size; i++) {
+    for (size_t i = 1; i < poll_size; i++) {
       if (pollfds[i].revents & POLLIN) {
         potato_t received_potato;
-        recv(pollfds[i].fd, &received_potato, sizeof(potato_t), MSG_WAITALL);
+        int bytes = recv(pollfds[i].fd, &received_potato, sizeof(potato_t), 0);
+        if (bytes <= 0) {
+          fprintf(stdout, "error receive potato, %d bytes received", bytes);
+        }
         print_potato(&received_potato);
         finish = 1;
-        break;
+        return;
       }
     }
   }
 }
 
 void print_potato(potato_t * p) {
-  char * trace = p->trace;
-  char my_trace[2048] = {0};
-  size_t trace_cur = 0;
-  size_t my_trace_cur = 0;
-  while (trace[trace_cur] != '\0') {
-    my_trace[my_trace_cur] = trace[trace_cur];
-    my_trace[my_trace_cur + 1] = ',';
-    my_trace_cur += 2;
-    trace_cur += 1;
-  }
-  my_trace[my_trace_cur - 1] = '\0';
+  int cur_len = ntohl(p->cur_hops);
+  //fprintf(stdout, "the length of trace is %d", cur_len);
+  p->trace[cur_len - 1] = 0;
   fprintf(stdout, "Trace of potato:\n");
-  fprintf(stdout, "%s\n", my_trace);
+  fprintf(stdout, "%s\n", p->trace);
 }
