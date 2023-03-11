@@ -42,7 +42,7 @@ int main(int argc, char * argv[]) {
 
   create_table_color(C);
   add_all_colors(C);
-
+  add_all_constraints(C);
   exercise(C);
 
   //Close database connection

@@ -198,6 +198,22 @@ void add_apostrophe(string & str) {
     str.insert(pos, "'");
   }
 }
+
+void add_all_constraints(connection * C) {
+  string sql1 =
+      "ALTER TABLE \"PLAYER\""
+      "ADD CONSTRAINT PFKTID FOREIGN KEY (\"TEAM_ID\") REFERENCES \"TEAM\"(\"TEAM_ID\");";
+  string sql2 = "ALTER TABLE \"TEAM\""
+                "ADD CONSTRAINT TFKSID FOREIGN KEY (\"STATE_ID\") REFERENCES "
+                "\"STATE\"(\"STATE_ID\");"
+                "ALTER TABLE \"TEAM\""
+                "ADD CONSTRAINT TFKCID FOREIGN KEY (\"COLOR_ID\") REFERENCES "
+                "\"COLOR\"(\"COLOR_ID\");";
+  work W(*C);
+  W.exec(sql1);
+  W.exec(sql2);
+  W.commit();
+}
 /*
  * All use_ params are used as flags for corresponding attributes
  * a 1 for a use_ param means this attribute is enabled (i.e. a WHERE clause is needed)
@@ -222,16 +238,113 @@ void query1(connection * C,
             int use_bpg,
             double min_bpg,
             double max_bpg) {
+  vector<string> sqls;
+  sqls.push_back("SELECT * FROM \"PLAYER\"");
+  if (use_mpg) {
+    sqls.push_back("(\"MPG\" BETWEEN " + to_string(min_mpg) + " AND " +
+                   to_string(max_mpg) + ")");
+  }
+  if (use_ppg) {
+    sqls.push_back("(\"PPG\" BETWEEN " + to_string(min_ppg) + " AND " +
+                   to_string(max_ppg) + ")");
+  }
+  if (use_rpg) {
+    sqls.push_back("(\"RPG\" BETWEEN " + to_string(min_rpg) + " AND " +
+                   to_string(max_rpg) + ")");
+  }
+  if (use_apg) {
+    sqls.push_back("(\"APG\" BETWEEN " + to_string(min_apg) + " AND " +
+                   to_string(max_apg) + ")");
+  }
+  if (use_spg) {
+    sqls.push_back("(\"SPG\" BETWEEN " + to_string(min_spg) + " AND " +
+                   to_string(max_spg) + ")");
+  }
+  if (use_bpg) {
+    sqls.push_back("(\"BPG\" BETWEEN " + to_string(min_bpg) + " AND " +
+                   to_string(max_bpg) + ")");
+  }
+  string sql;
+  for (size_t i = 0; i < sqls.size(); i++) {
+    if (i == 1) {
+      sql += " WHERE ";
+    }
+    if (i >= 2) {
+      sql += " AND ";
+    }
+    sql += sqls[i];
+  }
+  sql += ";";
+  nontransaction n(*C);
+  result R(n.exec(sql));
+  cout << "PLAYER_ID TEAM_ID UNIFORM_NUM FIRST_NAME LAST_NAME MPG PPG RPG APG SPG BPG"
+       << endl;
+  cout << fixed << setprecision(1);
+  for (result::const_iterator c = R.begin(); c != R.end(); ++c) {
+    cout << c[0].as<int>() << " " << c[1].as<int>() << " " << c[2].as<int>() << " "
+         << c[3].as<string>() << " " << c[4].as<string>() << " " << c[5].as<int>() << " "
+         << c[6].as<int>() << " " << c[7].as<int>() << " " << c[8].as<int>() << " "
+         << c[9].as<double>() << " " << c[10].as<double>() << " " << endl;
+  }
 }
 
+//show the name of each team with the indicated uniform color
 void query2(connection * C, string team_color) {
+  string sql = "SELECT \"TEAM\".\"NAME\""
+               "FROM \"TEAM\", \"COLOR\""
+               "WHERE \"TEAM\".\"COLOR_ID\"=\"COLOR\".\"COLOR_ID\""
+               " AND \"COLOR\".\"NAME\"=\'" +
+               team_color + "\';";
+  nontransaction n(*C);
+  result R(n.exec(sql));
+  cout << "NAME" << endl;
+  for (result::const_iterator c = R.begin(); c != R.end(); ++c) {
+    cout << c[0].as<string>() << endl;
+  }
 }
 
+//show the first and last name of each player that plays for the indicated team, ordered from highest to lowest ppg (points per game)
 void query3(connection * C, string team_name) {
+  string sql = "SELECT \"FIRST_NAME\", \"LAST_NAME\""
+               "FROM \"PLAYER\",\"TEAM\""
+               "WHERE \"PLAYER\".\"TEAM_ID\"=\"TEAM\".\"TEAM_ID\" AND \"NAME\"=\'" +
+               team_name + "\' ORDER BY \"PPG\" DESC;";
+  nontransaction n(*C);
+  result R(n.exec(sql));
+  cout << "FIRST_NAME LAST_NAME" << endl;
+  for (result::const_iterator c = R.begin(); c != R.end(); ++c) {
+    cout << c[0].as<string>() << " " << c[1].as<string>() << endl;
+  }
 }
 
+//show uniform number, first name and last name of each player that plays in the indicated state and wears the indicated uniform color
 void query4(connection * C, string team_state, string team_color) {
+  string sql = "select \"UNIFORM_NUM\",\"FIRST_NAME\",\"LAST_NAME\""
+               "from \"PLAYER\",\"TEAM\",\"STATE\",\"COLOR\""
+               "where \"PLAYER\".\"TEAM_ID\"=\"TEAM\".\"TEAM_ID\" AND "
+               "\"TEAM\".\"COLOR_ID\"=\"COLOR\".\"COLOR_ID\" AND "
+               "\"TEAM\".\"STATE_ID\"=\"STATE\".\"STATE_ID\" AND \"STATE\".\"NAME\"=\'" +
+               team_state + "\' AND \"COLOR\".\"NAME\"=\'" + team_color + "\';";
+  nontransaction n(*C);
+  result R(n.exec(sql));
+  cout << "UNIFORM_NUM FIRST_NAME LAST_NAME" << endl;
+  for (result::const_iterator c = R.begin(); c != R.end(); ++c) {
+    cout << c[0].as<int>() << " " << c[1].as<string>() << " " << c[2].as<string>()
+         << endl;
+  }
 }
 
+//show first name and last name of each player, and team name and number of wins for each team that has won more than the indicated number of games
 void query5(connection * C, int num_wins) {
+  string sql = "select \"FIRST_NAME\", \"LAST_NAME\",\"NAME\",\"WINS\""
+               "from \"PLAYER\",\"TEAM\""
+               "where \"PLAYER\".\"TEAM_ID\"=\"TEAM\".\"TEAM_ID\" AND \"WINS\" > " +
+               to_string(num_wins) + ";";
+  nontransaction n(*C);
+  result R(n.exec(sql));
+  cout << "FIRST_NAME LAST_NAME NAME WINS" << endl;
+  for (result::const_iterator c = R.begin(); c != R.end(); ++c) {
+    cout << c[0].as<string>() << " " << c[1].as<string>() << " " << c[2].as<string>()
+         << " " << c[3].as<int>() << endl;
+  }
 }

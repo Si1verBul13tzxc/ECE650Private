@@ -1,9 +1,10 @@
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <pqxx/pqxx>
 #include <sstream>
 #include <string>
-
+#include <vector>
 using namespace std;
 using namespace pqxx;
 
