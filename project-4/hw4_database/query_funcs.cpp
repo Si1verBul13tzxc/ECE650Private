@@ -8,7 +8,7 @@ void drop_all(connection * C) {
   work W(*C);
   W.exec(sql);
   W.commit();
-  cout << "all table dropped" << endl;
+  // cout << "all table dropped" << endl;
 }
 
 void create_table_player(connection * C) {
