@@ -9,14 +9,13 @@
 #include <linux/module.h>  // for all modules
 #include <linux/moduleparam.h>
 #include <linux/sched.h>
-#include <sys/types.h>
 
 #define PREFIX "sneaky_process"
 
 //This is a pointer to the system call table
 static unsigned long * sys_call_table;
-static pid_t pid = 0;
-module_param(pid, pid_t, 0);
+static int pid = 0;
+module_param(pid, int, 0);
 
 // Helper functions, turn on and off the PTE address protection mode
 // for syscall_table pointer
